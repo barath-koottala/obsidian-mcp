@@ -1,0 +1,23 @@
+{
+  "name": "obsidian-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP Server for Obsidian Vault Access",
+  "main": "obsidian-mcp-server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node obsidian-mcp-server.js",
+    "dev": "node --inspect obsidian-mcp-server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.60.0",
+    "@modelcontextprotocol/sdk": "^0.6.0"
+  },
+  "keywords": [
+    "mcp",
+    "obsidian",
+    "notes",
+    "knowledge-management"
+  ],
+  "author": "Your Name",
+  "license": "MIT"
+}
