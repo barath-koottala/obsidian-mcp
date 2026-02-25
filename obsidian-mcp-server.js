@@ -786,7 +786,7 @@ class ObsidianMCPServer {
     const monthName = this.getMonthName(date);
 
     // Try new flat layout first: Farther/YYYY/MonthName/YYYY-MM-DD.md
-    const flatPath = this.resolvePath(`Notes/Farther/${year}/${monthName}/${dateStr}.md`);
+    const flatPath = this.resolvePath(`Farther/${year}/${monthName}/${dateStr}.md`);
     try {
       await fs.access(flatPath);
       return {
@@ -798,7 +798,7 @@ class ObsidianMCPServer {
     }
 
     // Try old week-folder layout: Farther/YYYY/MonthName/Week .../YYYY-MM-DD.md
-    const monthDir = this.resolvePath(`Notes/Farther/${year}/${monthName}`);
+    const monthDir = this.resolvePath(`Farther/${year}/${monthName}`);
     try {
       const entries = await fs.readdir(monthDir, { withFileTypes: true });
       for (const entry of entries) {
@@ -828,7 +828,7 @@ class ObsidianMCPServer {
    */
   async findDailyNotesInRange(startDate, endDate) {
     const results = [];
-    const fartherPath = this.resolvePath('Notes/Farther');
+    const fartherPath = this.resolvePath('Farther');
 
     // Determine which year/month combos to scan
     const current = new Date(startDate);
@@ -1238,7 +1238,7 @@ class ObsidianMCPServer {
       const today = new Date();
       const year = today.getFullYear().toString();
       const monthName = this.getMonthName(today);
-      const monthDir = this.resolvePath(`Notes/Farther/${year}/${monthName}`);
+      const monthDir = this.resolvePath(`Farther/${year}/${monthName}`);
       await fs.mkdir(monthDir, { recursive: true });
 
       const outputPath = path.join(monthDir, filename);
@@ -1490,7 +1490,7 @@ class ObsidianMCPServer {
       const today = new Date();
       const year = today.getFullYear().toString();
       const monthName = this.getMonthName(today);
-      const monthDir = this.resolvePath(`Notes/Farther/${year}/${monthName}`);
+      const monthDir = this.resolvePath(`Farther/${year}/${monthName}`);
       await fs.mkdir(monthDir, { recursive: true });
 
       const outputPath = path.join(monthDir, filename);
@@ -1756,7 +1756,7 @@ class ObsidianMCPServer {
 
     const year = today.getFullYear().toString();
     const monthName = this.getMonthName(today);
-    return this.resolvePath(`Notes/Farther/${year}/${monthName}/${dateStr}.md`);
+    return this.resolvePath(`Farther/${year}/${monthName}/${dateStr}.md`);
   }
 
   async ensureDailyNoteExists(notePath) {
