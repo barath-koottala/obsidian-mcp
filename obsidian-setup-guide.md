@@ -227,20 +227,25 @@ from your Google Calendar into your Obsidian notes — no manual copy-pasting.
 
 ## Step 7: Add the MCP to Claude Code
 
-Add this to your Claude Code MCP config (`~/.claude/mcp.json` or your project's `.mcp.json`):
+Open `~/.claude.json` in a text editor. Find the `"mcpServers"` key (or add it if it doesn't exist) and add the `obsidian-vault` entry:
 
 ```json
 {
   "mcpServers": {
     "obsidian-vault": {
       "command": "node",
-      "args": ["/full/path/to/obsidian-mcp/obsidian-mcp-server.js"]
+      "args": ["/full/path/to/obsidian-mcp/obsidian-mcp-server.js"],
+      "env": {}
     }
   }
 }
 ```
 
-Replace `/full/path/to/` with the actual path where you installed it. Restart Claude Code after saving.
+Replace `/full/path/to/` with the actual path where you cloned the repo (e.g. `/Users/yourname/obsidian-mcp/obsidian-mcp-server.js`).
+
+> **Note:** If `mcpServers` already has other entries, just add the `"obsidian-vault"` block alongside them — don't replace the whole object.
+
+Restart Claude Code after saving.
 
 ---
 
