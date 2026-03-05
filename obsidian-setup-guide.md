@@ -188,6 +188,14 @@ from your Google Calendar into your Obsidian notes — no manual copy-pasting.
 
 - **Node.js 18+** — check with `node --version`
 - If not installed: `brew install node`
+- **Obsidian v1.12+** (recommended) — enables CLI integration for faster search, task parsing, and more robust path handling. The MCP falls back to direct file access if the CLI is unavailable.
+
+### Enable the Obsidian CLI (recommended)
+
+1. Make sure you're on Obsidian v1.12+ (`brew upgrade --cask obsidian` or download from [obsidian.md/download](https://obsidian.md/download))
+2. Open Obsidian > **Settings > General > Command line interface** > enable it
+3. Follow the prompt to register the CLI in your PATH
+4. Verify it works: `obsidian version`
 
 ### Installation
 
@@ -198,30 +206,14 @@ from your Google Calendar into your Obsidian notes — no manual copy-pasting.
    npm install
    ```
 
-2. Edit the vault path in `obsidian-mcp-server.js`. Find the line:
-   ```js
-   const VAULT_ROOT = "..."
-   ```
-   Change it to **your** vault path:
+2. Set your vault path as an environment variable (see Step 7 below). You no longer need to edit the source code — the vault path is configured in your Claude Code MCP config.
 
-   **If you used iCloud (Option A):**
-   ```js
-   const VAULT_ROOT = "/Users/<your-username>/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes";
-   ```
-
-   **If you used local (Option B):**
-   ```js
-   const VAULT_ROOT = "/Users/<your-username>/Documents/ObsidianVault";
-   ```
-
-3. Also update `WORKING_DIR` if your daily notes live under a different top-level folder.
-   By default it's set to `"Farther/"`. Change it to whatever folder name you chose in Step 3.5.
-
-4. Test the server starts:
+3. Test the server starts:
    ```bash
    npm start
    ```
    It should start without errors. Press `Ctrl+C` to stop.
+   If the Obsidian CLI is detected, you'll see: `[obsidian-mcp] CLI detected at: ...`
 
 ---
 
@@ -235,13 +227,27 @@ Open `~/.claude.json` in a text editor. Find the `"mcpServers"` key (or add it i
     "obsidian-vault": {
       "command": "node",
       "args": ["/full/path/to/obsidian-mcp/obsidian-mcp-server.js"],
-      "env": {}
+      "env": {
+        "OBSIDIAN_VAULT_ROOT": "/Users/<your-username>/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes"
+      }
     }
   }
 }
 ```
 
-Replace `/full/path/to/` with the actual path where you cloned the repo (e.g. `/Users/yourname/obsidian-mcp/obsidian-mcp-server.js`).
+Replace:
+- `/full/path/to/` with the actual path where you cloned the repo
+- `OBSIDIAN_VAULT_ROOT` with your vault's absolute path:
+  - **iCloud:** `/Users/<your-username>/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes`
+  - **Local:** `/Users/<your-username>/Documents/ObsidianVault`
+
+**Optional environment variables:**
+
+| Variable | Description |
+|---|---|
+| `OBSIDIAN_VAULT_ROOT` | Absolute path to your Obsidian vault (required for fs fallback) |
+| `OBSIDIAN_CLI_PATH` | Custom path to the `obsidian` CLI binary (auto-detected if in PATH) |
+| `OBSIDIAN_VAULT_NAME` | Vault name for multi-vault setups (passed as `vault=<name>` to CLI) |
 
 > **Note:** If `mcpServers` already has other entries, just add the `"obsidian-vault"` block alongside them — don't replace the whole object.
 
