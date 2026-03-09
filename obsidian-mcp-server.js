@@ -8,29 +8,15 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import fs from 'fs/promises';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { ObsidianCLI } from './cli-wrapper.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// Obsidian vault root - points to iCloud Obsidian vault (used for fs fallback)
-const VAULT_ROOT = path.resolve(
-  process.env.OBSIDIAN_VAULT_ROOT ||
-  '/Users/barath/Library/Mobile Documents/iCloud~md~obsidian/Documents/Notes'
-);
-
-// Default working path for daily notes (Farther/current year)
-const FARTHER_ROOT = path.join(VAULT_ROOT, 'Farther');
 
 class ObsidianMCPServer {
   constructor() {
     this.server = new Server(
       {
         name: 'obsidian-vault-server',
-        version: '0.3.0',
+        version: '0.4.0',
       },
       {
         capabilities: {
@@ -40,20 +26,8 @@ class ObsidianMCPServer {
     );
 
     this.cli = new ObsidianCLI();
-    this._cliMode = null;
 
     this.setupToolHandlers();
-  }
-
-  /**
-   * Check if CLI is available. Caches result for the session.
-   * Returns true if CLI should be used, false for fs fallback.
-   */
-  async useCLI() {
-    if (this._cliMode === null) {
-      this._cliMode = await this.cli.isAvailable();
-    }
-    return this._cliMode;
   }
 
   setupToolHandlers() {
@@ -62,7 +36,7 @@ class ObsidianMCPServer {
         tools: [
           {
             name: 'read_note',
-            description: 'Read the contents of a specific note file. Daily notes are stored at Farther/YYYY/MonthName/YYYY-MM-DD.md (e.g., Farther/2026/February/2026-02-24.md). You can also pass just a date like "2026-02-24" and it will auto-resolve to the correct path.',
+            description: 'Read the contents of a specific note file. You can pass just a date like "2026-02-24" and it will auto-resolve to the correct file anywhere in the vault using Obsidian\'s name-based lookup.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -104,7 +78,7 @@ class ObsidianMCPServer {
           },
           {
             name: 'search_notes',
-            description: 'Search for notes containing specific text. Defaults to searching under Farther/ directory.',
+            description: 'Search for notes containing specific text. Searches the entire vault by default.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -122,7 +96,7 @@ class ObsidianMCPServer {
           },
           {
             name: 'list_notes',
-            description: 'List all notes or notes in a specific folder. Defaults to Farther/ directory.',
+            description: 'List all notes or notes in a specific folder. Searches the entire vault by default.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -140,7 +114,7 @@ class ObsidianMCPServer {
           },
           {
             name: 'get_recent_notes',
-            description: 'Get notes modified within a specified time period. Defaults to Farther/ directory.',
+            description: 'Get notes modified within a specified time period. Searches the entire vault by default.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -369,89 +343,60 @@ class ObsidianMCPServer {
       const { name, arguments: args } = request.params;
 
       try {
-        const cli = await this.useCLI();
-
         switch (name) {
           case 'read_note':
-            return cli
-              ? await this.readNoteCLI(args.file_path)
-              : await this.readNoteFS(args.file_path);
+            return await this.readNote(args.file_path);
 
           case 'write_note':
-            return cli
-              ? await this.writeNoteCLI(args.file_path, args.content, args.create_folders, args.append_mode)
-              : await this.writeNoteFS(args.file_path, args.content, args.create_folders, args.append_mode);
+            return await this.writeNote(args.file_path, args.content, args.create_folders, args.append_mode);
 
           case 'search_notes':
-            return cli
-              ? await this.searchNotesCLI(args.query, args.folder_path)
-              : await this.searchNotesFS(args.query, args.folder_path);
+            return await this.searchNotes(args.query, args.folder_path);
 
           case 'list_notes':
-            return cli
-              ? await this.listNotesCLI(args.folder_path, args.recursive)
-              : await this.listNotesFS(args.folder_path, args.recursive);
+            return await this.listNotes(args.folder_path, args.recursive);
 
           case 'get_recent_notes':
-            return cli
-              ? await this.getRecentNotesCLI(args.days || 7, args.folder_path)
-              : await this.getRecentNotesFS(args.days || 7, args.folder_path);
+            return await this.getRecentNotes(args.days || 7, args.folder_path);
 
           case 'analyze_trends':
-            // No CLI equivalent — always uses fs
             return await this.analyzeTrends(args.days || 14, args.keyword);
 
           case 'extract_tasks':
-            return cli
-              ? await this.extractTasksCLI(args)
-              : await this.extractTasksFS(args);
+            return await this.extractTasks(args);
 
           case 'generate_task_summary':
-            return cli
-              ? await this.generateTaskSummaryCLI(args)
-              : await this.generateTaskSummaryFS(args);
+            return await this.generateTaskSummary(args);
 
           case 'aggregate_tasks_by_period':
-            return cli
-              ? await this.aggregateTasksByPeriodCLI(args)
-              : await this.aggregateTasksByPeriodFS(args);
+            return await this.aggregateTasksByPeriod(args);
 
           case 'create_period_rollover_summary':
-            return cli
-              ? await this.createPeriodRolloverSummaryCLI(args)
-              : await this.createPeriodRolloverSummaryFS(args);
+            return await this.createPeriodRolloverSummary(args);
 
           case 'get_my_actionable_items':
-            return cli
-              ? await this.getMyActionableItemsCLI(args)
-              : await this.getMyActionableItemsFS(args);
+            return await this.getMyActionableItems(args);
 
           case 'write_todos_to_today':
-            return cli
-              ? await this.writeTodosToTodayCLI(args)
-              : await this.writeTodosToTodayFS(args);
+            return await this.writeTodosToToday(args);
 
           default:
             throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
       } catch (error) {
-        // If CLI failed, try fs fallback on next call
-        if (this._cliMode && error.message?.includes('Obsidian CLI error')) {
-          this.cli.resetAvailability();
-          this._cliMode = null;
-        }
+        if (error instanceof McpError) throw error;
         throw new McpError(ErrorCode.InternalError, `Error executing ${name}: ${error.message}`);
       }
     });
   }
 
-  // ===== CLI-backed implementations =====
+  // ===== Tool Implementations =====
 
-  async readNoteCLI(filePath) {
+  async readNote(filePath) {
     const dateMatch = filePath.match(/^(\d{4}-\d{2}-\d{2})(?:\.md)?$/);
 
     if (dateMatch) {
-      // For today's date, use daily:read directly (returns raw content, no header)
+      // For today's date, use daily:read directly (fast path)
       const today = this.formatDateStr(new Date());
       if (dateMatch[1] === today) {
         try {
@@ -464,16 +409,14 @@ class ObsidianMCPServer {
           throw new Error(`No daily note found for today (${today}).`);
         }
       }
-      // For other dates, construct path and use read (CLI adds # header + Last modified)
-      const date = new Date(dateMatch[1] + 'T12:00:00');
-      const year = date.getFullYear().toString();
-      const monthName = this.getMonthName(date);
-      const notePath = `Farther/${year}/${monthName}/${dateMatch[1]}.md`;
+
+      // For other dates, use CLI's native name-based resolution (searches entire vault)
+      const filename = `${dateMatch[1]}`;
       try {
-        const content = await this.cli.readFile(notePath);
+        const content = await this.cli.readFileByName(filename);
         return { content: [{ type: 'text', text: content }] };
       } catch {
-        throw new Error(`No daily note found for date: ${dateMatch[1]}. Expected at ${notePath}`);
+        throw new Error(`No daily note found for date: ${dateMatch[1]}. Searched vault for "${filename}".`);
       }
     }
 
@@ -482,7 +425,7 @@ class ObsidianMCPServer {
     return { content: [{ type: 'text', text: content }] };
   }
 
-  async writeNoteCLI(filePath, content, createFolders = true, appendMode = true) {
+  async writeNote(filePath, content, createFolders = true, appendMode = true) {
     if (appendMode) {
       await this.cli.appendFile(filePath, content);
     } else {
@@ -499,14 +442,11 @@ class ObsidianMCPServer {
     };
   }
 
-  async searchNotesCLI(query, folderPath = '') {
-    const searchPath = folderPath || 'Farther';
+  async searchNotes(query, folderPath = '') {
     try {
-      const output = await this.cli.exec([
-        'search:context',
-        `query=${query}`,
-        `path=${searchPath}`,
-      ], { timeout: 30_000 });
+      const args = ['search:context', `query=${query}`];
+      if (folderPath) args.push(`path=${folderPath}`);
+      const output = await this.cli.exec(args, { timeout: 30_000 });
 
       if (!output.trim()) {
         return {
@@ -544,61 +484,53 @@ class ObsidianMCPServer {
     }
   }
 
-  async listNotesCLI(folderPath = '', recursive = true) {
-    const folder = folderPath || 'Farther';
+  async listNotes(folderPath = '', recursive = true) {
+    const label = folderPath || 'vault';
     try {
-      const output = await this.cli.exec(['files', `folder=${folder}`, 'ext=md']);
+      const args = ['files', 'ext=md'];
+      if (folderPath) args.push(`folder=${folderPath}`);
+      const output = await this.cli.exec(args);
       const files = output.trim().split('\n').filter(Boolean);
 
       if (files.length === 0) {
         return {
-          content: [{ type: 'text', text: `No notes found in ${folder}.` }],
+          content: [{ type: 'text', text: `No notes found in ${label}.` }],
         };
       }
 
-      let responseText = `Found ${files.length} note(s) in ${folder}:\n\n`;
+      let responseText = `Found ${files.length} note(s) in ${label}:\n\n`;
       for (const file of files) {
         responseText += `- ${file}\n`;
       }
       return { content: [{ type: 'text', text: responseText }] };
     } catch {
       return {
-        content: [{ type: 'text', text: `No notes found in ${folder}.` }],
+        content: [{ type: 'text', text: `No notes found in ${label}.` }],
       };
     }
   }
 
-  async getRecentNotesCLI(days, folderPath = '') {
-    const folder = folderPath || 'Farther';
-    // Use CLI to list files, then filter by modification date client-side
+  async getRecentNotes(days, folderPath = '') {
     try {
-      const output = await this.cli.exec(['files', `folder=${folder}`, 'ext=md']);
+      const args = ['files', 'ext=md'];
+      if (folderPath) args.push(`folder=${folderPath}`);
+      const output = await this.cli.exec(args);
       const files = output.trim().split('\n').filter(Boolean);
 
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - days);
 
-      // Get file info for each to check mtime
-      const recentFiles = [];
-      for (const filePath of files) {
-        try {
-          const info = await this.cli.exec(['file', `path=${filePath}`]);
-          const modifiedMatch = info.match(/modified\s+(\d+)/);
-          if (modifiedMatch) {
-            const mtime = new Date(parseInt(modifiedMatch[1]));
-            if (mtime > cutoffDate) {
-              recentFiles.push({
-                relativePath: filePath,
-                lastModified: mtime.toISOString().split('T')[0],
-                mtime,
-              });
-            }
-          }
-        } catch {
-          // Skip files we can't get info for
-        }
-      }
+      // Parallel: get file info to check mtime (10 concurrent)
+      const fileInfos = await this.cli.parallel(files, async (filePath) => {
+        const info = await this.cli.exec(['file', `path=${filePath}`]);
+        const modifiedMatch = info.match(/modified\s+(\d+)/);
+        if (!modifiedMatch) return null;
+        const mtime = new Date(parseInt(modifiedMatch[1]));
+        if (mtime <= cutoffDate) return null;
+        return { relativePath: filePath, lastModified: mtime.toISOString().split('T')[0], mtime };
+      });
 
+      const recentFiles = fileInfos.filter(Boolean);
       recentFiles.sort((a, b) => b.mtime - a.mtime);
 
       if (recentFiles.length === 0) {
@@ -612,17 +544,99 @@ class ObsidianMCPServer {
         responseText += `- ${file.relativePath} (modified: ${file.lastModified})\n`;
       }
       return { content: [{ type: 'text', text: responseText }] };
-    } catch {
-      // Fallback to FS if CLI fails
-      return this.getRecentNotesFS(days, folderPath);
+    } catch (error) {
+      throw new Error(`Failed to get recent notes: ${error.message}`);
     }
   }
 
-  // ===== CLI task/aggregation implementations =====
+  async analyzeTrends(days, keyword) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
 
-  /**
-   * Convert CLI task JSON to internal task format.
-   */
+    const trends = {
+      totalNotes: 0,
+      dailyActivity: {},
+      topTopics: {},
+      keywordMentions: 0,
+    };
+
+    // List all markdown files across the vault
+    const output = await this.cli.exec(['files', 'ext=md']);
+    const files = output.trim().split('\n').filter(Boolean);
+
+    // Parallel: get file info to filter by mtime
+    const fileInfos = await this.cli.parallel(files, async (filePath) => {
+      const info = await this.cli.exec(['file', `path=${filePath}`]);
+      const modifiedMatch = info.match(/modified\s+(\d+)/);
+      if (!modifiedMatch) return null;
+      const mtime = new Date(parseInt(modifiedMatch[1]));
+      if (mtime <= cutoffDate) return null;
+      return { filePath, mtime };
+    });
+
+    const recentFiles = fileInfos.filter(Boolean);
+
+    // Parallel: read content of recent files only
+    const contents = await this.cli.parallel(recentFiles, async ({ filePath }) => {
+      return await this.cli.readFile(filePath);
+    });
+
+    for (let i = 0; i < recentFiles.length; i++) {
+      const { mtime } = recentFiles[i];
+      const content = contents[i];
+      if (!content) continue;
+
+      trends.totalNotes++;
+
+      const date = mtime.toISOString().split('T')[0];
+      trends.dailyActivity[date] = (trends.dailyActivity[date] || 0) + 1;
+
+      if (keyword && content.toLowerCase().includes(keyword.toLowerCase())) {
+        trends.keywordMentions++;
+      }
+
+      const topics = content.match(/#\w+|#{1,6}\s+([^\n]+)/g);
+      if (topics) {
+        topics.forEach((topic) => {
+          const cleanTopic = topic.replace(/^#+\s*/, '').toLowerCase();
+          if (cleanTopic.length > 2) {
+            trends.topTopics[cleanTopic] = (trends.topTopics[cleanTopic] || 0) + 1;
+          }
+        });
+      }
+    }
+
+    const dailyActivityArray = Object.entries(trends.dailyActivity)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const topTopics = Object.entries(trends.topTopics)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10)
+      .map(([topic, count]) => `${topic}: ${count} mentions`);
+
+    let analysisText = `Trend Analysis (Last ${days} days):\n\n`;
+    analysisText += `**Overview:**\n`;
+    analysisText += `- Total notes analyzed: ${trends.totalNotes}\n`;
+
+    if (keyword) {
+      analysisText += `- "${keyword}" mentions: ${trends.keywordMentions}\n`;
+    }
+
+    analysisText += `\n**Daily Activity:**\n`;
+    analysisText += dailyActivityArray
+      .map(({ date, count }) => `- ${date}: ${count} notes`)
+      .join('\n');
+
+    analysisText += `\n\n**Top Topics:**\n${topTopics.join('\n')}`;
+
+    return {
+      content: [{ type: 'text', text: analysisText }],
+    };
+  }
+
+  // ===== Task/Aggregation Implementations =====
+
   cliTaskToInternal(cliTask) {
     const completed = cliTask.status === 'x' || cliTask.status === 'X';
     const rawLine = cliTask.text;
@@ -630,21 +644,14 @@ class ObsidianMCPServer {
     const text = taskMatch ? taskMatch[1] : rawLine;
     const timestampMatch = text.match(/\u2705\s+(\d{4}-\d{2}-\d{2})/);
     const timestamp = timestampMatch ? timestampMatch[1] : null;
-    const sourceFile = path.basename(cliTask.file);
+    const sourceFile = cliTask.file.split('/').pop();
 
     return { completed, text, rawLine, sourceFile, timestamp };
   }
 
-  /**
-   * Extract tasks from a single file using CLI.
-   */
-  async extractTasksFromFileCLI(filePath) {
+  async extractTasksFromFile(filePath) {
     try {
-      // filePath could be absolute or relative — make it relative for CLI
-      const relativePath = filePath.startsWith('/')
-        ? path.relative(VAULT_ROOT, filePath)
-        : filePath;
-      const cliTasks = await this.cli.tasksFromFile(relativePath);
+      const cliTasks = await this.cli.tasksFromFile(filePath);
       return cliTasks
         .filter(t => t.text.trim() !== '- [ ]') // Skip empty checkbox placeholders
         .map(t => this.cliTaskToInternal(t));
@@ -654,51 +661,34 @@ class ObsidianMCPServer {
   }
 
   /**
-   * Find daily notes in a date range using CLI file listing.
+   * Extract tasks from multiple files in parallel.
+   * @param {string[]} filePaths - Paths to extract tasks from
+   * @returns {Promise<Array<{completed, text, rawLine, sourceFile, timestamp}>>} Flat array of all tasks
    */
-  async findDailyNotesInRangeCLI(startDate, endDate) {
+  async extractTasksFromFiles(filePaths) {
+    const results = await this.cli.parallel(
+      filePaths,
+      async (filePath) => this.extractTasksFromFile(filePath),
+    );
+    return results.filter(Boolean).flat();
+  }
+
+  async findDailyNotesInRange(startDate, endDate) {
+    // Search entire vault for date-named files (not restricted to a single folder)
+    const allFiles = await this.cli.findFilesByPattern(/^\d{4}-\d{2}-\d{2}\.md$/);
+
     const results = [];
-
-    // Calculate which months to scan
-    const current = new Date(startDate);
-    current.setDate(1);
-    const endMonth = new Date(endDate);
-    endMonth.setDate(1);
-
-    const monthsToScan = [];
-    while (current <= endMonth) {
-      monthsToScan.push({
-        year: current.getFullYear().toString(),
-        monthName: this.getMonthName(current)
-      });
-      current.setMonth(current.getMonth() + 1);
-    }
-
-    const datePattern = /^\d{4}-\d{2}-\d{2}\.md$/;
-
-    for (const { year, monthName } of monthsToScan) {
-      const folder = `Farther/${year}/${monthName}`;
-      try {
-        const output = await this.cli.exec(['files', `folder=${folder}`, 'ext=md']);
-        const files = output.trim().split('\n').filter(Boolean);
-
-        for (const filePath of files) {
-          const filename = path.basename(filePath);
-          if (datePattern.test(filename)) {
-            const dateStr = filename.replace('.md', '');
-            const noteDate = new Date(dateStr + 'T12:00:00');
-            if (noteDate >= startDate && noteDate <= endDate) {
-              results.push({
-                date: noteDate,
-                dateStr,
-                fullPath: filePath, // CLI returns relative paths
-                relativePath: filePath,
-              });
-            }
-          }
-        }
-      } catch {
-        // Month folder doesn't exist, skip
+    for (const filePath of allFiles) {
+      const filename = filePath.split('/').pop();
+      const dateStr = filename.replace('.md', '');
+      const noteDate = new Date(dateStr + 'T12:00:00');
+      if (noteDate >= startDate && noteDate <= endDate) {
+        results.push({
+          date: noteDate,
+          dateStr,
+          fullPath: filePath,
+          relativePath: filePath,
+        });
       }
     }
 
@@ -706,10 +696,10 @@ class ObsidianMCPServer {
     return results;
   }
 
-  async extractTasksCLI(args) {
+  async extractTasks(args) {
     try {
       const { startDate, endDate } = this.parseDateRangeArgs(args);
-      const dailyNotes = await this.findDailyNotesInRangeCLI(startDate, endDate);
+      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
 
       if (dailyNotes.length === 0) {
         return {
@@ -717,19 +707,9 @@ class ObsidianMCPServer {
         };
       }
 
-      const completedTasks = [];
-      const incompleteTasks = [];
-
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFileCLI(note.fullPath);
-        for (const task of tasks) {
-          if (task.completed) {
-            completedTasks.push(task);
-          } else {
-            incompleteTasks.push(task);
-          }
-        }
-      }
+      const allTasks = await this.extractTasksFromFiles(dailyNotes.map(n => n.fullPath));
+      const completedTasks = allTasks.filter(t => t.completed);
+      const incompleteTasks = allTasks.filter(t => !t.completed);
 
       if (completedTasks.length === 0 && incompleteTasks.length === 0) {
         return {
@@ -772,8 +752,7 @@ class ObsidianMCPServer {
     }
   }
 
-  async generateTaskSummaryCLI(args) {
-    // Use CLI for task extraction, then write output with CLI
+  async generateTaskSummary(args) {
     try {
       const { startDate, endDate } = this.parseDateRangeArgs(args);
       const filename = args.filename || 'Task-Summary.md';
@@ -782,21 +761,16 @@ class ObsidianMCPServer {
         showSource: args.show_source || false,
       };
 
-      const dailyNotes = await this.findDailyNotesInRangeCLI(startDate, endDate);
+      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
       if (dailyNotes.length === 0) {
         return {
           content: [{ type: 'text', text: `No daily notes found for ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}. Cannot generate summary.` }],
         };
       }
 
-      const completedTasks = [];
-      const incompleteTasks = [];
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFileCLI(note.fullPath);
-        for (const task of tasks) {
-          (task.completed ? completedTasks : incompleteTasks).push(task);
-        }
-      }
+      const allTasks = await this.extractTasksFromFiles(dailyNotes.map(n => n.fullPath));
+      const completedTasks = allTasks.filter(t => t.completed);
+      const incompleteTasks = allTasks.filter(t => !t.completed);
 
       const markdown = this.generateTaskSummaryMarkdown(completedTasks, incompleteTasks, options);
       const today = new Date();
@@ -818,8 +792,7 @@ class ObsidianMCPServer {
     }
   }
 
-  async aggregateTasksByPeriodCLI(args) {
-    // Reuse FS logic but with CLI task extraction
+  async aggregateTasksByPeriod(args) {
     try {
       const {
         period = 'current_week',
@@ -840,7 +813,7 @@ class ObsidianMCPServer {
       }
 
       const { startDate, endDate } = this.calculatePeriodDateRange(period, custom_start_date, custom_end_date);
-      const dailyNotes = await this.findDailyNotesInRangeCLI(startDate, endDate);
+      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
 
       if (dailyNotes.length === 0) {
         return {
@@ -848,11 +821,7 @@ class ObsidianMCPServer {
         };
       }
 
-      let allTasks = [];
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFileCLI(note.fullPath);
-        allTasks.push(...tasks);
-      }
+      let allTasks = await this.extractTasksFromFiles(dailyNotes.map(n => n.fullPath));
 
       // Apply filter
       if (filter === 'completed') {
@@ -896,7 +865,7 @@ class ObsidianMCPServer {
     }
   }
 
-  async createPeriodRolloverSummaryCLI(args) {
+  async createPeriodRolloverSummary(args) {
     try {
       const {
         source_period = 'last_week',
@@ -910,7 +879,7 @@ class ObsidianMCPServer {
       }
 
       const { startDate, endDate } = this.calculatePeriodDateRange(source_period);
-      const dailyNotes = await this.findDailyNotesInRangeCLI(startDate, endDate);
+      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
 
       if (dailyNotes.length === 0) {
         return {
@@ -918,14 +887,9 @@ class ObsidianMCPServer {
         };
       }
 
-      const completedTasks = [];
-      const incompleteTasks = [];
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFileCLI(note.fullPath);
-        for (const task of tasks) {
-          (task.completed ? completedTasks : incompleteTasks).push(task);
-        }
-      }
+      const allTasks = await this.extractTasksFromFiles(dailyNotes.map(n => n.fullPath));
+      const completedTasks = allTasks.filter(t => t.completed);
+      const incompleteTasks = allTasks.filter(t => !t.completed);
 
       const periodName = source_period.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
       let rolloverMarkdown = `# Task Rollover: ${periodName}\n\n`;
@@ -975,7 +939,7 @@ class ObsidianMCPServer {
     }
   }
 
-  async getMyActionableItemsCLI(args) {
+  async getMyActionableItems(args) {
     try {
       const { timeframe = 'today', custom_date, filter = 'incomplete', include_metadata = true } = args;
 
@@ -1022,18 +986,14 @@ class ObsidianMCPServer {
         throw new McpError(ErrorCode.InvalidRequest, 'Invalid timeframe or missing custom_date.');
       }
 
-      const dailyNotes = await this.findDailyNotesInRangeCLI(startDate, endDate);
+      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
       if (dailyNotes.length === 0) {
         return {
           content: [{ type: 'text', text: `No daily notes found for ${timeframe.replace(/_/g, ' ')}.` }],
         };
       }
 
-      let allTasks = [];
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFileCLI(note.fullPath);
-        allTasks.push(...tasks);
-      }
+      let allTasks = await this.extractTasksFromFiles(dailyNotes.map(n => n.fullPath));
 
       if (filter === 'incomplete') allTasks = allTasks.filter(t => !t.completed);
       else if (filter === 'completed') allTasks = allTasks.filter(t => t.completed);
@@ -1064,7 +1024,7 @@ class ObsidianMCPServer {
     }
   }
 
-  async writeTodosToTodayCLI(args) {
+  async writeTodosToToday(args) {
     try {
       const {
         obsidian_tasks = [],
@@ -1083,7 +1043,7 @@ class ObsidianMCPServer {
         content = await this.cli.dailyRead();
       }
 
-      // Generate and insert TODO content (reuse existing section surgery logic)
+      // Generate and insert TODO content
       const todoContent = this.generateTodoContent(obsidian_tasks, linear_tickets);
       const updatedContent = this.updateNoteWithTodoContent(content, todoContent, strategy);
 
@@ -1103,326 +1063,7 @@ class ObsidianMCPServer {
     }
   }
 
-  // ===== Core Note Operations (FS fallback) =====
-
-  async readNoteFS(filePath) {
-    // Check if filePath is a bare date (YYYY-MM-DD) — auto-resolve to daily note
-    const dateMatch = filePath.match(/^(\d{4}-\d{2}-\d{2})(?:\.md)?$/);
-    if (dateMatch) {
-      const date = new Date(dateMatch[1] + 'T12:00:00');
-      if (!isNaN(date.getTime())) {
-        const resolved = await this.resolveDailyNotePath(date);
-        if (resolved) {
-          const content = await fs.readFile(resolved.fullPath, 'utf-8');
-          const stats = await fs.stat(resolved.fullPath);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `# ${path.basename(resolved.fullPath)}\n\nPath: ${resolved.relativePath}\nLast modified: ${stats.mtime.toISOString()}\n\n${content}`,
-              },
-            ],
-          };
-        }
-        throw new Error(`No daily note found for date: ${dateMatch[1]}. Expected at Farther/${date.getFullYear()}/${this.getMonthName(date)}/${dateMatch[1]}.md`);
-      }
-    }
-
-    const fullPath = this.resolvePath(filePath);
-    await this.validatePath(fullPath);
-
-    try {
-      const content = await fs.readFile(fullPath, 'utf-8');
-      const stats = await fs.stat(fullPath);
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `# ${path.basename(filePath)}\n\nLast modified: ${stats.mtime.toISOString()}\n\n${content}`,
-          },
-        ],
-      };
-    } catch (error) {
-      throw new Error(`Failed to read file: ${error.message}`);
-    }
-  }
-
-  async writeNoteFS(filePath, content, createFolders = true, appendMode = true) {
-    const fullPath = this.resolvePath(filePath);
-    await this.validatePath(fullPath);
-
-    try {
-      if (createFolders) {
-        const dirPath = path.dirname(fullPath);
-        await fs.mkdir(dirPath, { recursive: true });
-      }
-
-      if (appendMode) {
-        try {
-          await fs.access(fullPath);
-          const existingContent = await fs.readFile(fullPath, 'utf-8');
-          await fs.writeFile(fullPath, existingContent + content, 'utf-8');
-        } catch (error) {
-          await fs.writeFile(fullPath, content, 'utf-8');
-        }
-      } else {
-        await fs.writeFile(fullPath, content, 'utf-8');
-      }
-
-      const stats = await fs.stat(fullPath);
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Successfully ${appendMode ? 'appended to' : 'wrote to'} ${filePath}\n\nFile size: ${stats.size} bytes\nLast modified: ${stats.mtime.toISOString()}`,
-          },
-        ],
-      };
-    } catch (error) {
-      throw new Error(`Failed to write file: ${error.message}`);
-    }
-  }
-
-  async searchNotesFS(query, folderPath = '') {
-    const searchPath = folderPath ? this.resolvePath(folderPath) : FARTHER_ROOT;
-    await this.validatePath(searchPath);
-
-    const results = [];
-    await this.searchInDirectory(searchPath, query.toLowerCase(), results);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Found ${results.length} notes containing "${query}":\n\n${results
-            .map(
-              (result) =>
-                `**${result.relativePath}**\n${result.matches
-                  .map((match) => `- ${match}`)
-                  .join('\n')}\n`
-            )
-            .join('\n')}`,
-        },
-      ],
-    };
-  }
-
-  async searchInDirectory(dirPath, query, results) {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-
-      if (entry.isDirectory()) {
-        await this.searchInDirectory(fullPath, query, results);
-      } else if (entry.name.endsWith('.md')) {
-        try {
-          const content = await fs.readFile(fullPath, 'utf-8');
-          const lines = content.split('\n');
-          const matches = [];
-
-          lines.forEach((line, index) => {
-            if (line.toLowerCase().includes(query)) {
-              matches.push(`Line ${index + 1}: ${line.trim()}`);
-            }
-          });
-
-          if (matches.length > 0) {
-            results.push({
-              relativePath: path.relative(VAULT_ROOT, fullPath),
-              matches: matches.slice(0, 5),
-            });
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-    }
-  }
-
-  async listNotesFS(folderPath = '', recursive = true) {
-    const searchPath = folderPath ? this.resolvePath(folderPath) : FARTHER_ROOT;
-    await this.validatePath(searchPath);
-
-    const notes = [];
-    await this.collectNotes(searchPath, notes, recursive);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Found ${notes.length} notes:\n\n${notes
-            .map((note) => `- ${note.relativePath} (${note.lastModified})`)
-            .join('\n')}`,
-        },
-      ],
-    };
-  }
-
-  async collectNotes(dirPath, notes, recursive) {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-
-      if (entry.isDirectory() && recursive) {
-        await this.collectNotes(fullPath, notes, recursive);
-      } else if (entry.name.endsWith('.md')) {
-        try {
-          const stats = await fs.stat(fullPath);
-          notes.push({
-            relativePath: path.relative(VAULT_ROOT, fullPath),
-            lastModified: stats.mtime.toISOString().split('T')[0],
-          });
-        } catch (error) {
-          continue;
-        }
-      }
-    }
-  }
-
-  async getRecentNotesFS(days, folderPath = '') {
-    const searchPath = folderPath ? this.resolvePath(folderPath) : FARTHER_ROOT;
-    await this.validatePath(searchPath);
-
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-
-    const recentNotes = [];
-    await this.collectRecentNotes(searchPath, cutoffDate, recentNotes);
-
-    recentNotes.sort((a, b) => new Date(b.lastModified) - new Date(a.lastModified));
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Found ${recentNotes.length} notes modified in the last ${days} days:\n\n${recentNotes
-            .map((note) => `- **${note.relativePath}** (${note.lastModified})`)
-            .join('\n')}`,
-        },
-      ],
-    };
-  }
-
-  async collectRecentNotes(dirPath, cutoffDate, notes) {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(dirPath, entry.name);
-
-      if (entry.isDirectory()) {
-        await this.collectRecentNotes(fullPath, cutoffDate, notes);
-      } else if (entry.name.endsWith('.md')) {
-        try {
-          const stats = await fs.stat(fullPath);
-          if (stats.mtime > cutoffDate) {
-            notes.push({
-              relativePath: path.relative(VAULT_ROOT, fullPath),
-              lastModified: stats.mtime.toISOString(),
-            });
-          }
-        } catch (error) {
-          continue;
-        }
-      }
-    }
-  }
-
-  async analyzeTrends(days, keyword) {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - days);
-
-    const trends = {
-      totalNotes: 0,
-      dailyActivity: {},
-      topTopics: {},
-      keywordMentions: 0,
-    };
-
-    await this.analyzeDirectory(FARTHER_ROOT, cutoffDate, trends, keyword);
-
-    const dailyActivityArray = Object.entries(trends.dailyActivity)
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-
-    const topTopics = Object.entries(trends.topTopics)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .map(([topic, count]) => `${topic}: ${count} mentions`);
-
-    let analysisText = `Trend Analysis (Last ${days} days):\n\n`;
-    analysisText += `**Overview:**\n`;
-    analysisText += `- Total notes analyzed: ${trends.totalNotes}\n`;
-
-    if (keyword) {
-      analysisText += `- "${keyword}" mentions: ${trends.keywordMentions}\n`;
-    }
-
-    analysisText += `\n**Daily Activity:**\n`;
-    analysisText += dailyActivityArray
-      .map(({ date, count }) => `- ${date}: ${count} notes`)
-      .join('\n');
-
-    analysisText += `\n\n**Top Topics:**\n${topTopics.join('\n')}`;
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: analysisText,
-        },
-      ],
-    };
-  }
-
-  async analyzeDirectory(dirPath, cutoffDate, trends, keyword) {
-    try {
-      const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name);
-
-        if (entry.isDirectory()) {
-          await this.analyzeDirectory(fullPath, cutoffDate, trends, keyword);
-        } else if (entry.name.endsWith('.md')) {
-          try {
-            const stats = await fs.stat(fullPath);
-            if (stats.mtime > cutoffDate) {
-              trends.totalNotes++;
-
-              const date = stats.mtime.toISOString().split('T')[0];
-              trends.dailyActivity[date] = (trends.dailyActivity[date] || 0) + 1;
-
-              const content = await fs.readFile(fullPath, 'utf-8');
-
-              if (keyword && content.toLowerCase().includes(keyword.toLowerCase())) {
-                trends.keywordMentions++;
-              }
-
-              const topics = content.match(/#\w+|#{1,6}\s+([^\n]+)/g);
-              if (topics) {
-                topics.forEach((topic) => {
-                  const cleanTopic = topic.replace(/^#+\s*/, '').toLowerCase();
-                  if (cleanTopic.length > 2) {
-                    trends.topTopics[cleanTopic] = (trends.topTopics[cleanTopic] || 0) + 1;
-                  }
-                });
-              }
-            }
-          } catch (error) {
-            continue;
-          }
-        }
-      }
-    } catch (error) {
-      return;
-    }
-  }
-
-  // ===== Date Calculation Helper Methods =====
+  // ===== Date Calculation Helpers =====
 
   getStartOfWeek(date) {
     const result = new Date(date);
@@ -1481,131 +1122,6 @@ class ObsidianMCPServer {
     return date.toISOString().split('T')[0];
   }
 
-  /**
-   * Resolve a date to its daily note file path, supporting both layouts:
-   *   New (Nov 2025+): Farther/YYYY/MonthName/YYYY-MM-DD.md
-   *   Old (pre-Nov 2025): Farther/YYYY/MonthName/Week .../YYYY-MM-DD.md
-   */
-  async resolveDailyNotePath(date) {
-    const dateStr = this.formatDateStr(date);
-    const year = date.getFullYear().toString();
-    const monthName = this.getMonthName(date);
-
-    // Try new flat layout first: Farther/YYYY/MonthName/YYYY-MM-DD.md
-    const flatPath = this.resolvePath(`Farther/${year}/${monthName}/${dateStr}.md`);
-    try {
-      await fs.access(flatPath);
-      return {
-        fullPath: flatPath,
-        relativePath: `Farther/${year}/${monthName}/${dateStr}.md`
-      };
-    } catch (e) {
-      // Not found in flat layout, try week-folder layout
-    }
-
-    // Try old week-folder layout: Farther/YYYY/MonthName/Week .../YYYY-MM-DD.md
-    const monthDir = this.resolvePath(`Farther/${year}/${monthName}`);
-    try {
-      const entries = await fs.readdir(monthDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory() && entry.name.startsWith('Week ')) {
-          const weekNotePath = path.join(monthDir, entry.name, `${dateStr}.md`);
-          try {
-            await fs.access(weekNotePath);
-            return {
-              fullPath: weekNotePath,
-              relativePath: `Farther/${year}/${monthName}/${entry.name}/${dateStr}.md`
-            };
-          } catch (e) {
-            // Not in this week folder, continue
-          }
-        }
-      }
-    } catch (e) {
-      // Month directory doesn't exist
-    }
-
-    return null;
-  }
-
-  /**
-   * Find all daily notes (YYYY-MM-DD.md) within a date range,
-   * scanning both flat and week-folder layouts under Farther/YYYY/MonthName/.
-   */
-  async findDailyNotesInRange(startDate, endDate) {
-    const results = [];
-    const fartherPath = this.resolvePath('Farther');
-
-    // Determine which year/month combos to scan
-    const current = new Date(startDate);
-    current.setDate(1);
-    const endMonth = new Date(endDate);
-    endMonth.setDate(1);
-
-    const monthsToScan = [];
-    while (current <= endMonth) {
-      monthsToScan.push({
-        year: current.getFullYear().toString(),
-        monthName: this.getMonthName(current)
-      });
-      current.setMonth(current.getMonth() + 1);
-    }
-
-    const datePattern = /^\d{4}-\d{2}-\d{2}\.md$/;
-
-    for (const { year, monthName } of monthsToScan) {
-      const monthDir = path.join(fartherPath, year, monthName);
-
-      try {
-        const entries = await fs.readdir(monthDir, { withFileTypes: true });
-
-        for (const entry of entries) {
-          if (entry.isFile() && datePattern.test(entry.name)) {
-            // New flat layout: YYYY-MM-DD.md directly in month dir
-            const dateStr = entry.name.replace('.md', '');
-            const noteDate = new Date(dateStr + 'T12:00:00');
-            if (noteDate >= startDate && noteDate <= endDate) {
-              results.push({
-                date: noteDate,
-                dateStr,
-                fullPath: path.join(monthDir, entry.name)
-              });
-            }
-          } else if (entry.isDirectory() && entry.name.startsWith('Week ')) {
-            // Old week-folder layout: scan inside for YYYY-MM-DD.md files
-            const weekDir = path.join(monthDir, entry.name);
-            try {
-              const weekEntries = await fs.readdir(weekDir, { withFileTypes: true });
-              for (const weekEntry of weekEntries) {
-                if (weekEntry.isFile() && datePattern.test(weekEntry.name)) {
-                  const dateStr = weekEntry.name.replace('.md', '');
-                  const noteDate = new Date(dateStr + 'T12:00:00');
-                  if (noteDate >= startDate && noteDate <= endDate) {
-                    results.push({
-                      date: noteDate,
-                      dateStr,
-                      fullPath: path.join(weekDir, weekEntry.name)
-                    });
-                  }
-                }
-              }
-            } catch (e) {
-              // Skip unreadable week folders
-            }
-          }
-        }
-      } catch (e) {
-        // Month directory doesn't exist, skip
-      }
-    }
-
-    results.sort((a, b) => a.date - b.date);
-    return results;
-  }
-
-  /**
-   * Calculate date range for a named period
-   */
   calculatePeriodDateRange(period, customStartDate = null, customEndDate = null, referenceDate = new Date()) {
     let startDate, endDate;
 
@@ -1615,36 +1131,39 @@ class ObsidianMCPServer {
         endDate = this.getEndOfWeek(referenceDate);
         break;
 
-      case 'last_week':
+      case 'last_week': {
         const lastWeekDate = new Date(referenceDate);
         lastWeekDate.setDate(lastWeekDate.getDate() - 7);
         startDate = this.getStartOfWeek(lastWeekDate);
         endDate = this.getEndOfWeek(lastWeekDate);
         break;
+      }
 
       case 'current_month':
         startDate = this.getStartOfMonth(referenceDate);
         endDate = this.getEndOfMonth(referenceDate);
         break;
 
-      case 'last_month':
+      case 'last_month': {
         const lastMonthDate = new Date(referenceDate);
         lastMonthDate.setMonth(lastMonthDate.getMonth() - 1);
         startDate = this.getStartOfMonth(lastMonthDate);
         endDate = this.getEndOfMonth(lastMonthDate);
         break;
+      }
 
       case 'current_year':
         startDate = this.getStartOfYear(referenceDate);
         endDate = this.getEndOfYear(referenceDate);
         break;
 
-      case 'last_year':
+      case 'last_year': {
         const lastYearDate = new Date(referenceDate);
         lastYearDate.setFullYear(lastYearDate.getFullYear() - 1);
         startDate = this.getStartOfYear(lastYearDate);
         endDate = this.getEndOfYear(lastYearDate);
         break;
+      }
 
       case 'custom':
         if (!customStartDate || !customEndDate) {
@@ -1671,52 +1190,10 @@ class ObsidianMCPServer {
     return { startDate, endDate };
   }
 
-  // ===== Task Parsing Helpers =====
-
-  parseTask(line, sourceFile) {
-    const taskMatch = line.match(/^-\s+\[([ xX])\]\s+(.+)$/);
-    if (!taskMatch) {
-      return null;
-    }
-
-    const completed = taskMatch[1].toLowerCase() === 'x';
-    const text = taskMatch[2];
-
-    const timestampMatch = text.match(/\u2705\s+(\d{4}-\d{2}-\d{2})/);
-    const timestamp = timestampMatch ? timestampMatch[1] : null;
-
-    return {
-      completed,
-      text,
-      rawLine: line,
-      sourceFile,
-      timestamp,
-    };
-  }
-
-  async extractTasksFromFile(filePath) {
-    try {
-      const content = await fs.readFile(filePath, 'utf-8');
-      const lines = content.split('\n');
-      const sourceFile = path.basename(filePath);
-      const tasks = [];
-
-      for (const line of lines) {
-        const task = this.parseTask(line.trim(), sourceFile);
-        if (task) {
-          tasks.push(task);
-        }
-      }
-
-      return tasks;
-    } catch (error) {
-      return [];
-    }
-  }
+  // ===== Shared Helpers =====
 
   groupTasksBySource(tasks) {
     const grouped = {};
-
     for (const task of tasks) {
       const filename = task.sourceFile;
       if (!grouped[filename]) {
@@ -1724,7 +1201,6 @@ class ObsidianMCPServer {
       }
       grouped[filename].push(task);
     }
-
     return grouped;
   }
 
@@ -1793,11 +1269,6 @@ class ObsidianMCPServer {
     return markdown;
   }
 
-  // ===== Tool Handlers =====
-
-  /**
-   * Parse optional start_date/end_date from args, defaulting to current week
-   */
   parseDateRangeArgs(args) {
     let startDate, endDate;
     const today = new Date();
@@ -1829,657 +1300,7 @@ class ObsidianMCPServer {
     return { startDate, endDate };
   }
 
-  /**
-   * Handle extract_tasks tool
-   */
-  async extractTasksFS(args) {
-    try {
-      const { startDate, endDate } = this.parseDateRangeArgs(args);
-      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
-
-      if (dailyNotes.length === 0) {
-        return {
-          content: [{ type: 'text', text: `No daily notes found for ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}.` }],
-        };
-      }
-
-      const completedTasks = [];
-      const incompleteTasks = [];
-
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFile(note.fullPath);
-        for (const task of tasks) {
-          if (task.completed) {
-            completedTasks.push(task);
-          } else {
-            incompleteTasks.push(task);
-          }
-        }
-      }
-
-      if (completedTasks.length === 0 && incompleteTasks.length === 0) {
-        return {
-          content: [{ type: 'text', text: `No tasks found for ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}.` }],
-        };
-      }
-
-      let responseText = `# Tasks from ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}\n\n`;
-      responseText += `**Total Tasks:** ${completedTasks.length + incompleteTasks.length}\n`;
-      responseText += `**Notes Found:** ${dailyNotes.length}\n\n`;
-
-      if (incompleteTasks.length > 0) {
-        responseText += `## Incomplete Tasks (${incompleteTasks.length})\n\n`;
-        const groupedIncomplete = this.groupTasksBySource(incompleteTasks);
-        for (const filename of Object.keys(groupedIncomplete).sort()) {
-          responseText += `### ${filename.replace('.md', '')}\n\n`;
-          for (const task of groupedIncomplete[filename]) {
-            responseText += `${task.rawLine}\n`;
-          }
-          responseText += '\n';
-        }
-      }
-
-      if (completedTasks.length > 0) {
-        responseText += `## Completed Tasks (${completedTasks.length})\n\n`;
-        const groupedCompleted = this.groupTasksBySource(completedTasks);
-        for (const filename of Object.keys(groupedCompleted).sort()) {
-          responseText += `### ${filename.replace('.md', '')}\n\n`;
-          for (const task of groupedCompleted[filename]) {
-            responseText += `${task.rawLine}\n`;
-          }
-          responseText += '\n';
-        }
-      }
-
-      return { content: [{ type: 'text', text: responseText }] };
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      throw new McpError(ErrorCode.InternalError, `Failed to extract tasks: ${error.message}`);
-    }
-  }
-
-  /**
-   * Handle generate_task_summary tool
-   */
-  async generateTaskSummaryFS(args) {
-    try {
-      const { startDate, endDate } = this.parseDateRangeArgs(args);
-      const filename = args.filename || 'Task-Summary.md';
-      const options = {
-        groupByDate: args.group_by_date || false,
-        showSource: args.show_source || false,
-      };
-
-      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
-
-      if (dailyNotes.length === 0) {
-        return {
-          content: [{ type: 'text', text: `No daily notes found for ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}. Cannot generate summary.` }],
-        };
-      }
-
-      const completedTasks = [];
-      const incompleteTasks = [];
-
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFile(note.fullPath);
-        for (const task of tasks) {
-          if (task.completed) {
-            completedTasks.push(task);
-          } else {
-            incompleteTasks.push(task);
-          }
-        }
-      }
-
-      if (completedTasks.length === 0 && incompleteTasks.length === 0) {
-        return {
-          content: [{ type: 'text', text: `No tasks found for ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}. Cannot generate summary.` }],
-        };
-      }
-
-      const markdown = this.generateTaskSummaryMarkdown(completedTasks, incompleteTasks, options);
-      const today = new Date();
-      const year = today.getFullYear().toString();
-      const monthName = this.getMonthName(today);
-      const monthDir = this.resolvePath(`Farther/${year}/${monthName}`);
-      await fs.mkdir(monthDir, { recursive: true });
-
-      const outputPath = path.join(monthDir, filename);
-      await fs.writeFile(outputPath, markdown, 'utf-8');
-      const stats = await fs.stat(outputPath);
-      const relativePath = path.relative(VAULT_ROOT, outputPath);
-
-      return {
-        content: [{
-          type: 'text',
-          text: `Task summary generated successfully!\n\n**File:** ${relativePath}\n**Period:** ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}\n**Total Tasks:** ${completedTasks.length + incompleteTasks.length}\n**Completed:** ${completedTasks.length}\n**Incomplete:** ${incompleteTasks.length}\n**Size:** ${stats.size} bytes`,
-        }],
-      };
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      throw new McpError(ErrorCode.InternalError, `Failed to generate task summary: ${error.message}`);
-    }
-  }
-
-  /**
-   * Handle aggregate_tasks_by_period tool
-   */
-  async aggregateTasksByPeriodFS(args) {
-    try {
-      const {
-        period,
-        custom_start_date,
-        custom_end_date,
-        filter = 'all',
-        group_by = 'date'
-      } = args;
-
-      const validPeriods = ['current_week', 'last_week', 'current_month', 'last_month', 'current_year', 'last_year', 'custom'];
-      if (!validPeriods.includes(period)) {
-        throw new McpError(
-          ErrorCode.InvalidRequest,
-          `Invalid period: ${period}. Must be one of: ${validPeriods.join(', ')}`
-        );
-      }
-
-      const validFilters = ['all', 'completed', 'incomplete'];
-      if (!validFilters.includes(filter)) {
-        throw new McpError(
-          ErrorCode.InvalidRequest,
-          `Invalid filter: ${filter}. Must be one of: ${validFilters.join(', ')}`
-        );
-      }
-
-      const dateRange = this.calculatePeriodDateRange(period, custom_start_date, custom_end_date);
-      const { startDate, endDate } = dateRange;
-
-      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
-
-      if (dailyNotes.length === 0) {
-        const periodName = period.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-        return {
-          content: [{
-            type: 'text',
-            text: `No daily notes found for ${periodName} (${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}).`
-          }]
-        };
-      }
-
-      const completedTasks = [];
-      const incompleteTasks = [];
-
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFile(note.fullPath);
-        for (const task of tasks) {
-          const enrichedTask = { ...task, noteDate: note.dateStr };
-          if (task.completed) {
-            completedTasks.push(enrichedTask);
-          } else {
-            incompleteTasks.push(enrichedTask);
-          }
-        }
-      }
-
-      let tasksForDisplay;
-      switch (filter) {
-        case 'completed':
-          tasksForDisplay = { completed: completedTasks, incomplete: [] };
-          break;
-        case 'incomplete':
-          tasksForDisplay = { completed: [], incomplete: incompleteTasks };
-          break;
-        case 'all':
-        default:
-          tasksForDisplay = { completed: completedTasks, incomplete: incompleteTasks };
-          break;
-      }
-
-      const periodName = period.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
-      const totalTasks = tasksForDisplay.completed.length + tasksForDisplay.incomplete.length;
-
-      let text = `# Task Aggregation: ${periodName}\n\n`;
-      text += `**Period:** ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}\n`;
-      text += `**Total Tasks:** ${totalTasks}\n`;
-      text += `**Completed:** ${tasksForDisplay.completed.length}\n`;
-      text += `**Incomplete:** ${tasksForDisplay.incomplete.length}\n`;
-      text += `**Notes Analyzed:** ${dailyNotes.length}\n\n`;
-      text += '---\n\n';
-
-      if (group_by === 'date') {
-        // Group tasks by their source date
-        const allTasks = [...tasksForDisplay.incomplete, ...tasksForDisplay.completed];
-        const byDate = {};
-        for (const task of allTasks) {
-          const dateKey = task.noteDate;
-          if (!byDate[dateKey]) {
-            byDate[dateKey] = { completed: [], incomplete: [] };
-          }
-          if (task.completed) {
-            byDate[dateKey].completed.push(task);
-          } else {
-            byDate[dateKey].incomplete.push(task);
-          }
-        }
-
-        const sortedDates = Object.keys(byDate).sort();
-        for (const dateKey of sortedDates) {
-          const dateTasks = byDate[dateKey];
-          text += `## ${dateKey}\n\n`;
-          if (dateTasks.incomplete.length > 0) {
-            text += `### Incomplete (${dateTasks.incomplete.length})\n\n`;
-            for (const task of dateTasks.incomplete) {
-              text += `${task.rawLine} _(${task.sourceFile})_\n`;
-            }
-            text += '\n';
-          }
-          if (dateTasks.completed.length > 0) {
-            text += `### Completed (${dateTasks.completed.length})\n\n`;
-            for (const task of dateTasks.completed) {
-              text += `${task.rawLine} _(${task.sourceFile})_\n`;
-            }
-            text += '\n';
-          }
-          text += '---\n\n';
-        }
-      } else {
-        // Flat list
-        if (tasksForDisplay.incomplete.length > 0) {
-          text += `## Incomplete Tasks (${tasksForDisplay.incomplete.length})\n\n`;
-          for (const task of tasksForDisplay.incomplete) {
-            text += `${task.rawLine} _(${task.sourceFile} - ${task.noteDate})_\n`;
-          }
-          text += '\n---\n\n';
-        }
-        if (tasksForDisplay.completed.length > 0) {
-          text += `## Completed Tasks (${tasksForDisplay.completed.length})\n\n`;
-          for (const task of tasksForDisplay.completed) {
-            text += `${task.rawLine} _(${task.sourceFile} - ${task.noteDate})_\n`;
-          }
-          text += '\n';
-        }
-      }
-
-      return {
-        content: [{
-          type: 'text',
-          text
-        }]
-      };
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to aggregate tasks by period: ${error.message}`
-      );
-    }
-  }
-
-  /**
-   * Handle create_period_rollover_summary tool
-   */
-  async createPeriodRolloverSummaryFS(args) {
-    try {
-      const {
-        source_period,
-        include_completed = true,
-        filename = 'Task-Rollover.md',
-      } = args;
-
-      const validPeriods = ['last_week', 'last_month', 'last_year'];
-      if (!validPeriods.includes(source_period)) {
-        throw new McpError(
-          ErrorCode.InvalidRequest,
-          `Invalid source_period: ${source_period}. Must be one of: ${validPeriods.join(', ')}`
-        );
-      }
-
-      const { startDate, endDate } = this.calculatePeriodDateRange(source_period);
-      const dailyNotes = await this.findDailyNotesInRange(startDate, endDate);
-
-      if (dailyNotes.length === 0) {
-        throw new McpError(
-          ErrorCode.InvalidRequest,
-          `No daily notes found for ${source_period} (${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}). Cannot create rollover summary.`
-        );
-      }
-
-      let totalCompleted = 0;
-      let totalIncomplete = 0;
-      const allIncompleteTasks = [];
-      const allCompletedTasks = [];
-
-      for (const note of dailyNotes) {
-        const tasks = await this.extractTasksFromFile(note.fullPath);
-        for (const task of tasks) {
-          if (task.completed) {
-            totalCompleted++;
-            allCompletedTasks.push({ ...task, noteDate: note.dateStr });
-          } else {
-            totalIncomplete++;
-            allIncompleteTasks.push({ ...task, noteDate: note.dateStr });
-          }
-        }
-      }
-
-      let rolloverMarkdown = `# Task Rollover: ${source_period.replace('_', ' ')}\n\n`;
-      rolloverMarkdown += `**Source Period:** ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}\n`;
-      rolloverMarkdown += `**Generated:** ${new Date().toISOString()}\n`;
-      rolloverMarkdown += `**Notes Analyzed:** ${dailyNotes.length}\n`;
-      rolloverMarkdown += `**Total Tasks:** ${totalCompleted + totalIncomplete}\n`;
-      rolloverMarkdown += `**Incomplete (to roll over):** ${totalIncomplete}\n`;
-      rolloverMarkdown += `**Completed:** ${totalCompleted}\n\n`;
-      rolloverMarkdown += '---\n\n';
-
-      if (allIncompleteTasks.length > 0) {
-        rolloverMarkdown += `## Tasks to Roll Over (${allIncompleteTasks.length})\n\n`;
-        for (const task of allIncompleteTasks) {
-          rolloverMarkdown += `${task.rawLine} _(${task.sourceFile} - ${task.noteDate})_\n`;
-        }
-        rolloverMarkdown += '\n';
-      }
-
-      if (include_completed && allCompletedTasks.length > 0) {
-        rolloverMarkdown += `## Completed Tasks (${allCompletedTasks.length})\n\n`;
-        for (const task of allCompletedTasks) {
-          rolloverMarkdown += `${task.rawLine} _(${task.sourceFile} - ${task.noteDate})_\n`;
-        }
-        rolloverMarkdown += '\n';
-      }
-
-      const today = new Date();
-      const year = today.getFullYear().toString();
-      const monthName = this.getMonthName(today);
-      const monthDir = this.resolvePath(`Farther/${year}/${monthName}`);
-      await fs.mkdir(monthDir, { recursive: true });
-
-      const outputPath = path.join(monthDir, filename);
-      await fs.writeFile(outputPath, rolloverMarkdown, 'utf-8');
-      const stats = await fs.stat(outputPath);
-
-      const relativePath = path.relative(VAULT_ROOT, outputPath);
-
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Task rollover summary created successfully!\n\n**File:** ${relativePath}\n**Source Period:** ${source_period.replace('_', ' ')}\n**Date Range:** ${this.formatDateStr(startDate)} to ${this.formatDateStr(endDate)}\n**Notes Analyzed:** ${dailyNotes.length}\n**Total Tasks from Period:** ${totalCompleted + totalIncomplete}\n**Tasks to Roll Over:** ${totalIncomplete} (incomplete)\n**Completed Tasks:** ${totalCompleted}\n**File Size:** ${stats.size} bytes`,
-          },
-        ],
-      };
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      throw new McpError(ErrorCode.InternalError, `Failed to create period rollover summary: ${error.message}`);
-    }
-  }
-
-  // ===== Actionable Items Methods =====
-
-  async getTodayTasks(targetDate = new Date(), filter = 'incomplete') {
-    const dateStr = this.formatDateStr(targetDate);
-    const resolved = await this.resolveDailyNotePath(targetDate);
-
-    if (!resolved) {
-      return {
-        tasks: [],
-        metadata: {
-          timeframe: 'today',
-          date: dateStr,
-          source: null,
-          error: 'Daily note not found'
-        }
-      };
-    }
-
-    const allTasks = await this.extractTasksFromFile(resolved.fullPath);
-
-    let filteredTasks;
-    switch (filter) {
-      case 'completed':
-        filteredTasks = allTasks.filter(t => t.completed);
-        break;
-      case 'incomplete':
-        filteredTasks = allTasks.filter(t => !t.completed);
-        break;
-      case 'all':
-      default:
-        filteredTasks = allTasks;
-        break;
-    }
-
-    return {
-      tasks: filteredTasks,
-      metadata: {
-        timeframe: 'today',
-        date: dateStr,
-        source: resolved.relativePath,
-        totalTasks: allTasks.length,
-        filteredCount: filteredTasks.length,
-        completedCount: allTasks.filter(t => t.completed).length,
-        incompleteCount: allTasks.filter(t => !t.completed).length
-      }
-    };
-  }
-
-  async getThisWeekTasks(targetDate = new Date(), filter = 'incomplete') {
-    const weekStart = this.getStartOfWeek(targetDate);
-    const weekEnd = this.getEndOfWeek(targetDate);
-
-    const dailyNotes = await this.findDailyNotesInRange(weekStart, weekEnd);
-
-    if (dailyNotes.length === 0) {
-      return {
-        tasks: [],
-        metadata: {
-          timeframe: 'this_week',
-          dateRange: {
-            start: this.formatDateStr(weekStart),
-            end: this.formatDateStr(weekEnd)
-          },
-          error: 'No daily notes found for this week'
-        }
-      };
-    }
-
-    const completedTasks = [];
-    const incompleteTasks = [];
-
-    for (const note of dailyNotes) {
-      const tasks = await this.extractTasksFromFile(note.fullPath);
-      for (const task of tasks) {
-        if (task.completed) {
-          completedTasks.push(task);
-        } else {
-          incompleteTasks.push(task);
-        }
-      }
-    }
-
-    let filteredTasks;
-    switch (filter) {
-      case 'completed':
-        filteredTasks = completedTasks;
-        break;
-      case 'incomplete':
-        filteredTasks = incompleteTasks;
-        break;
-      case 'all':
-      default:
-        filteredTasks = [...incompleteTasks, ...completedTasks];
-        break;
-    }
-
-    return {
-      tasks: filteredTasks,
-      metadata: {
-        timeframe: 'this_week',
-        dateRange: {
-          start: this.formatDateStr(weekStart),
-          end: this.formatDateStr(weekEnd)
-        },
-        notesFound: dailyNotes.length,
-        totalTasks: completedTasks.length + incompleteTasks.length,
-        filteredCount: filteredTasks.length,
-        completedCount: completedTasks.length,
-        incompleteCount: incompleteTasks.length
-      }
-    };
-  }
-
-  async getActionableItemsByTimeframe(timeframe, customDate = null, filter = 'incomplete') {
-    const validTimeframes = ['today', 'this_week', 'custom'];
-    if (!validTimeframes.includes(timeframe)) {
-      throw new Error(`Invalid timeframe: ${timeframe}. Must be one of: ${validTimeframes.join(', ')}`);
-    }
-
-    const validFilters = ['all', 'incomplete', 'completed'];
-    if (!validFilters.includes(filter)) {
-      throw new Error(`Invalid filter: ${filter}. Must be one of: ${validFilters.join(', ')}`);
-    }
-
-    if (timeframe === 'custom') {
-      if (!customDate) {
-        throw new Error('custom_date is required when timeframe is "custom"');
-      }
-      const targetDate = new Date(customDate);
-      if (isNaN(targetDate.getTime())) {
-        throw new Error('Invalid custom_date format. Please use ISO format (YYYY-MM-DD)');
-      }
-      return await this.getTodayTasks(targetDate, filter);
-    } else if (timeframe === 'today') {
-      return await this.getTodayTasks(new Date(), filter);
-    } else if (timeframe === 'this_week') {
-      return await this.getThisWeekTasks(new Date(), filter);
-    }
-  }
-
-  async getMyActionableItemsFS(args) {
-    try {
-      const { timeframe = 'today', custom_date, filter = 'incomplete', include_metadata = true } = args;
-
-      const result = await this.getActionableItemsByTimeframe(timeframe, custom_date, filter);
-
-      let responseText = '';
-
-      if (result.metadata.error) {
-        responseText = `# Actionable Items: ${timeframe.replace('_', ' ')}\n\n`;
-        responseText += `**Error:** ${result.metadata.error}\n\n`;
-        responseText += `**Date:** ${result.metadata.date || 'Unknown'}\n`;
-
-        if (result.metadata.source) {
-          responseText += `**Expected Source:** ${result.metadata.source}\n`;
-        }
-
-        return {
-          content: [{
-            type: 'text',
-            text: responseText
-          }]
-        };
-      }
-
-      responseText = `# Actionable Items: ${timeframe.replace('_', ' ')}\n\n`;
-
-      if (include_metadata) {
-        if (timeframe === 'today' || timeframe === 'custom') {
-          responseText += `**Date:** ${result.metadata.date}\n`;
-          responseText += `**Source:** ${result.metadata.source}\n`;
-        } else if (timeframe === 'this_week') {
-          if (result.metadata.dateRange) {
-            responseText += `**Week:** ${result.metadata.dateRange.start} to ${result.metadata.dateRange.end}\n`;
-          }
-          if (result.metadata.notesFound !== undefined) {
-            responseText += `**Notes Found:** ${result.metadata.notesFound}\n`;
-          }
-        }
-
-        responseText += `**Total Tasks:** ${result.metadata.totalTasks}\n`;
-        responseText += `**Filtered Tasks (${filter}):** ${result.metadata.filteredCount}\n`;
-        responseText += `**Completed:** ${result.metadata.completedCount}\n`;
-        responseText += `**Incomplete:** ${result.metadata.incompleteCount}\n\n`;
-        responseText += '---\n\n';
-      }
-
-      if (result.tasks.length === 0) {
-        responseText += `_No ${filter === 'all' ? '' : filter + ' '}tasks found._\n`;
-      } else {
-        responseText += `## Tasks (${result.tasks.length})\n\n`;
-
-        if (timeframe === 'this_week') {
-          const grouped = this.groupTasksBySource(result.tasks);
-          const sortedFiles = Object.keys(grouped).sort();
-
-          for (const filename of sortedFiles) {
-            responseText += `### ${filename.replace('.md', '')}\n\n`;
-            for (const task of grouped[filename]) {
-              responseText += `${task.rawLine}\n`;
-            }
-            responseText += '\n';
-          }
-        } else {
-          for (const task of result.tasks) {
-            responseText += `${task.rawLine}\n`;
-          }
-        }
-      }
-
-      return {
-        content: [{
-          type: 'text',
-          text: responseText
-        }]
-      };
-
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to get actionable items: ${error.message}`
-      );
-    }
-  }
-
-  // ===== Write TODOs to Today Methods =====
-
-  async getTodayNotePath() {
-    const today = new Date();
-    const dateStr = this.formatDateStr(today);
-
-    const resolved = await this.resolveDailyNotePath(today);
-    if (resolved) {
-      return resolved.fullPath;
-    }
-
-    const year = today.getFullYear().toString();
-    const monthName = this.getMonthName(today);
-    return this.resolvePath(`Farther/${year}/${monthName}/${dateStr}.md`);
-  }
-
-  async ensureDailyNoteExists(notePath) {
-    try {
-      await fs.access(notePath);
-      return false;
-    } catch (error) {
-      const dirPath = path.dirname(notePath);
-      await fs.mkdir(dirPath, { recursive: true });
-
-      const dateStr = path.basename(notePath, '.md');
-      const initialContent = `# ${dateStr}\n\n`;
-      await fs.writeFile(notePath, initialContent, 'utf-8');
-
-      return true;
-    }
-  }
+  // ===== TODO Section Helpers =====
 
   findTodoSection(content) {
     const lines = content.split('\n');
@@ -2510,14 +1331,10 @@ class ObsidianMCPServer {
     const endMarker = '<!-- END TODO GENERATED -->';
 
     const startIdx = content.indexOf(startMarker);
-    if (startIdx === -1) {
-      return null;
-    }
+    if (startIdx === -1) return null;
 
     const endIdx = content.indexOf(endMarker, startIdx);
-    if (endIdx === -1) {
-      return null;
-    }
+    if (endIdx === -1) return null;
 
     return {
       start: startIdx,
@@ -2627,66 +1444,6 @@ class ObsidianMCPServer {
       const insertLine = todoSection.endLine;
       lines.splice(insertLine, 0, '', newContent);
       return lines.join('\n');
-    }
-  }
-
-  async writeTodosToTodayFS(args) {
-    try {
-      const {
-        obsidian_tasks = [],
-        linear_tickets = [],
-        strategy = 'replace'
-      } = args;
-
-      const notePath = await this.getTodayNotePath();
-      const wasCreated = await this.ensureDailyNoteExists(notePath);
-      const content = await fs.readFile(notePath, 'utf-8');
-
-      const newContent = this.generateTodoContent(obsidian_tasks, linear_tickets);
-
-      const todoSection = this.findTodoSection(content);
-      const hadGeneratedContent = todoSection ? this.findGeneratedMarkers(todoSection.content) !== null : false;
-
-      const updatedContent = this.updateNoteWithTodoContent(content, newContent);
-
-      await fs.writeFile(notePath, updatedContent, 'utf-8');
-
-      return {
-        content: [{
-          type: 'text',
-          text: `\u2713 Successfully updated TODO section in today's note!\n\n**File:** ${path.basename(notePath)}\n**Note Created:** ${wasCreated ? 'Yes' : 'No'}\n**TODO Section Existed:** ${todoSection ? 'Yes' : 'No (created)'}\n**Generated Content:** ${hadGeneratedContent ? 'Updated' : 'Added'}\n**Obsidian Tasks:** ${obsidian_tasks.length}\n**Linear Tickets:** ${linear_tickets.length}\n\nThe generated content has been ${hadGeneratedContent ? 'updated' : 'added'} within your TODO section.`
-        }]
-      };
-
-    } catch (error) {
-      if (error instanceof McpError) {
-        throw error;
-      }
-      throw new McpError(
-        ErrorCode.InternalError,
-        `Failed to write TODOs to today's note: ${error.message}`
-      );
-    }
-  }
-
-  // ===== Utility Methods =====
-
-  resolvePath(relativePath) {
-    return path.resolve(VAULT_ROOT, relativePath);
-  }
-
-  async validatePath(fullPath) {
-    const normalizedPath = path.normalize(fullPath);
-    const normalizedRoot = path.normalize(VAULT_ROOT);
-
-    if (!normalizedPath.startsWith(normalizedRoot)) {
-      throw new Error('Path is outside of vault root');
-    }
-
-    try {
-      await fs.access(fullPath);
-    } catch (error) {
-      throw new Error('Path does not exist');
     }
   }
 

@@ -54,7 +54,7 @@ export class ObsidianCLI {
     if (this._available) {
       console.error(`[obsidian-mcp] CLI detected at: ${this._resolvedBinary}`);
     } else {
-      console.error('[obsidian-mcp] CLI not available. Using direct fs access.');
+      console.error('[obsidian-mcp] CLI not available. Obsidian must be running with CLI enabled.');
     }
 
     return this._available;
@@ -149,6 +149,15 @@ export class ObsidianCLI {
     return await this.exec(['read', `path=${filePath}`]);
   }
 
+  async readFileByName(name) {
+    return await this.exec(['read', `file=${name}`]);
+  }
+
+  async recentFiles() {
+    const output = await this.exec(['recents']);
+    return output.trim().split('\n').filter(Boolean);
+  }
+
   async createFile(filePath, content, { overwrite = false } = {}) {
     const args = ['create', `path=${filePath}`, `content=${content}`];
     if (overwrite) args.push('overwrite');
@@ -209,5 +218,68 @@ export class ObsidianCLI {
 
   async tagsCounts() {
     return await this.execJSON(['tags', 'counts']);
+  }
+
+  /**
+   * Run an async function over an array with bounded concurrency.
+   * @param {T[]} items - Items to process
+   * @param {(item: T) => Promise<R>} fn - Async function to apply
+   * @param {number} concurrency - Max parallel operations (default: 10)
+   * @returns {Promise<R[]>} Results in original order (failed items are null)
+   */
+  async parallel(items, fn, concurrency = 10) {
+    const results = new Array(items.length);
+    let nextIndex = 0;
+
+    async function worker() {
+      while (nextIndex < items.length) {
+        const i = nextIndex++;
+        try {
+          results[i] = await fn(items[i]);
+        } catch {
+          results[i] = null;
+        }
+      }
+    }
+
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+    );
+    return results;
+  }
+
+  /**
+   * Find a single file by its basename under an optional folder.
+   * @param {string} filename - e.g. '2026-03-02.md'
+   * @param {string|null} folder - e.g. 'Farther'
+   * @returns {string|null} relative path to the first match, or null
+   */
+  async findFileByName(filename, folder = null) {
+    const args = ['files', 'ext=md'];
+    if (folder) args.push(`folder=${folder}`);
+    const output = await this.exec(args);
+    const files = output.trim().split('\n').filter(Boolean);
+    for (const filePath of files) {
+      const basename = filePath.split('/').pop();
+      if (basename === filename) return filePath;
+    }
+    return null;
+  }
+
+  /**
+   * Find all files whose basename matches a regex, under an optional folder.
+   * @param {RegExp} pattern - e.g. /^\d{4}-\d{2}-\d{2}\.md$/
+   * @param {string|null} folder - e.g. 'Farther'
+   * @returns {string[]} array of relative paths
+   */
+  async findFilesByPattern(pattern, folder = null) {
+    const args = ['files', 'ext=md'];
+    if (folder) args.push(`folder=${folder}`);
+    const output = await this.exec(args);
+    const files = output.trim().split('\n').filter(Boolean);
+    return files.filter(filePath => {
+      const basename = filePath.split('/').pop();
+      return pattern.test(basename);
+    });
   }
 }
